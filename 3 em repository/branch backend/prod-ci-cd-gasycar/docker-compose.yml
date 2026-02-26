@@ -1,0 +1,143 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:15
+    container_name: postgres_db
+    environment:
+      POSTGRES_DB: gasycar
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+    ports:
+      - "5432:5432"
+    networks:
+      - app_net
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@gasycar.com
+      PGADMIN_DEFAULT_PASSWORD: strongPass123
+    ports:
+      - "5050:80"
+    restart: always
+    depends_on:
+      - db
+    networks:
+      - app_net
+
+  backend:
+    image: shop784/gasy-car-backend:latest
+    container_name: django_backend
+    command: >
+      sh -c "
+            python manage.py collectstatic --noinput &&
+            python manage.py makemigrations --noinput &&
+            python manage.py migrate --noinput &&
+
+            # create default user accounts
+            python manage.py create_default_admin &&
+            python manage.py create_default_client &&
+            python manage.py create_default_prestataire &&
+            python manage.py create_default_support &&
+
+            # vehicule data
+            python manage.py seed_vehicule_data &&
+            python manage.py add_vehicule_equipments &&
+            python manage.py create_default_blog &&
+            python manage.py create_blog_roadtrip &&
+            python manage.py create_blog_itineraires &&
+             python manage.py runserver 0.0.0.0:8000
+             "
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: gasycar
+      DB_USER: admin
+      DB_PASS: admin123
+      
+      # debug
+      DEBUG: False
+      # admin information
+      DEFAULT_ADMIN_EMAIL: admin@gasysystem.com
+      DEFAULT_ADMIN_PASSWORD: Admin123!
+      DEFAULT_ADMIN_FIRST_NAME: Super
+      DEFAULT_ADMIN_LAST_NAME: Admin
+
+      # client
+      DEFAULT_CLIENT_EMAIL: client@gasysystem.com
+      DEFAULT_CLIENT_PASSWORD: Client123!
+      DEFAULT_CLIENT_FIRST_NAME: Super
+      DEFAULT_CLIENT_LAST_NAME: client
+
+      # Prestataire
+      DEFAULT_PRESTATAIRE_EMAIL: owner@gasysystem.com
+      DEFAULT_PRESTATAIRE_PASSWORD: Client123!
+      DEFAULT_PRESTATAIRE_FIRST_NAME: Super
+      DEFAULT_PRESTATAIRE_LAST_NAME: Pretataire
+
+      # SUPORT
+      DEFAULT_SUPPORT_EMAIL: support@gasysystem.com
+      DEFAULT_SUPPORT_PASSWORD: Support123!
+      DEFAULT_SUPPORT_FIRST_NAME: Super
+      DEFAULT_SUPPORT_LAST_NAME: Support
+    volumes:
+      - media_volume:/app/media
+    depends_on:
+      - db
+    networks:
+      - app_net
+    ports:
+      - "8000:8000"
+    restart: always
+
+  frontend:
+    image: shop784/gasy-car-frontend:latest
+    container_name: react_frontend
+    environment:
+      VITE_API_BASE_URL: https://madagasycar.com/api
+    networks:
+      - app_net
+    ports:
+      - "3000:80"
+    restart: always
+
+  nginx:
+    image: nginx:1.25
+    container_name: nginx_reverse_proxy
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+      - media_volume:/app/media
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+      - frontend
+    restart: always
+    networks:
+      - app_net
+
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do sleep 12h; certbot renew; done;'"
+    networks:
+      - app_net # <= pas obligatoire mais recommandé
+
+volumes:
+  postgres_data:
+  media_volume:
+
+networks:
+  app_net:
+    driver: bridge

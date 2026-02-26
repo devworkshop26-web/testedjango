@@ -1,0 +1,58 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - prod
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install sshpass
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass
+
+      - name: Deploy to Remote Server
+        run: |
+          sshpass -p "${{ secrets.SERVER_PASSWORD }}" ssh -o StrictHostKeyChecking=no root@${{ secrets.SERVER_IP }} << 'EOF'
+
+          set -e  # Stop on first error
+
+          echo "📁 Se déplacer dans le dossier du projet"
+          cd prod-ci-cd-gasycar   # <-- 🔁 change selon ton chemin réel
+
+          echo "🔄 Pull du code depuis Git"
+          git reset --hard
+          git pull origin main
+
+          # 1) Stop nginx before certbot standalone
+          docker compose down
+
+          # 2) Run certbot standalone FIRST TIME ONLY
+          if [ ! -d "./certbot/conf/live/madagasycar.com" ]; then
+              echo "🔐 Generating SSL certificate..."
+              docker run --rm -p 80:80 \
+                -v "$(pwd)/certbot/conf:/etc/letsencrypt" \
+                certbot/certbot certonly --standalone \
+                -d madagasycar.com \
+                -d www.madagasycar.com \
+                --email devworkshop26@gmail.com \
+                --agree-tos \
+                --no-eff-email
+          fi
+
+          echo "🐳 Récupération des dernières images Docker"
+          docker compose pull
+
+          echo "🚀 Rebuild + lancement"
+          docker compose up -d --build
+
+          echo "🧹 Nettoyage Docker"
+          docker system prune -f
+
+          echo "✅ Déploiement terminé avec succès"
+          EOF
